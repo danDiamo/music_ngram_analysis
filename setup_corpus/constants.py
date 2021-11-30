@@ -7,7 +7,15 @@ setup_lookup_table() -- a function to convert NOTES_NAMES_NUMBERS constants dict
 flexible multi-directional lookups in corpus_processing_tools.py root assignment.
 """
 
+# TODO: Document, rename lookup tables; restructure second lookup table.
+
 import pandas as pd
+
+MUSIC21_LOOKUP_TABLE = {
+
+    'C': 0, 'C#': 1, 'D-': 1, 'D': 2, 'D#': 3, 'E-': 3, 'E': 4, 'F': 5, 'F#': 6,
+    'G-': 6, 'G': 7, 'G#': 8, 'A-': 8, 'A': 9, 'A#': 10, 'B-': 10, 'B': 11
+}
 
 NOTES_NAMES_NUMBERS = {
 
@@ -25,8 +33,22 @@ NOTES_NAMES_NUMBERS = {
     'B': list(range(11, 109, 12))
 }
 
-# TODO: Above works for root assignment but will need to add a second, reformatted, table for root detection
-#  with separate entries for all sharps and flats.
+
+def setup_music21_lookup_table(data=None):
+
+    if data is None:
+        data = MUSIC21_LOOKUP_TABLE
+    note_names = [key for key in data.keys()]
+    pitch_classes = [val for val in data.values()]
+    lookup_data = {
+        'note name': note_names,
+        'pitch class': pitch_classes
+    }
+
+    res = pd.DataFrame.from_dict(lookup_data)
+    print("\nSetting up Music21 root detection lookup table:")
+    print(res.head(), '\n\n')
+    return res
 
 
 def setup_lookup_table(data=None):
@@ -43,18 +65,19 @@ def setup_lookup_table(data=None):
     }
 
     res = pd.DataFrame.from_dict(lookup_data)
-    print("\nSetting up constants.py lookup table for root assignment:")
+    print("\nSetting up lookup table for root assignment:")
     print(res.head(), '\n\n')
     return res
 
 
 def main():
 
-    print(f'\nRunning constants.py\nLookup table:')
     setup_lookup_table()
+    setup_music21_lookup_table()
 
 
 if __name__ == "__main__":
     main()
 else:
     lookup_table = setup_lookup_table()
+    music21_lookup_table = setup_music21_lookup_table()

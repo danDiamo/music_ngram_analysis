@@ -28,7 +28,7 @@ import os
 import pandas as pd
 import traceback
 
-import constants
+import setup_corpus.constants as constants
 import utils
 
 pd.options.mode.chained_assignment = None
@@ -52,6 +52,7 @@ class Music21Corpus:
         self.inpath = inpath
         self.filenames = os.listdir(self.inpath)
         self.titles = [path.split('/')[-1][:-4] for path in self.filenames if path.endswith('.mid')]
+        self.roots_df = None
         self.melodies = None
         self.feat_seqs = None
         self.corpus = None
@@ -103,6 +104,78 @@ class Music21Corpus:
         print(f"{len(self.feat_seqs)} melodies successfully converted to feature sequence representation.\n")
         return self.feat_seqs
 
+    def run_music21_key_detection_algs(self):
+
+        self.roots_df = pd.DataFrame()
+        self.roots_df['title'] = self.titles
+        self.roots_df.reset_index(inplace=True, drop=True)
+
+        krumhansl = [tune.analyze('key') for tune in self.melodies]
+        self.roots_df['Krumhansl-Shmuckler'] = krumhansl
+
+        simple = [music21.analysis.discrete.SimpleWeights(tune).getSolution(tune)
+                  for tune in self.melodies]
+        self.roots_df['simple weights'] = simple
+
+        aarden = [music21.analysis.discrete.AardenEssen(tune).getSolution(tune)
+                  for tune in self.melodies]
+        self.roots_df['Aarden Essen'] = aarden
+
+        bellman = [music21.analysis.discrete.BellmanBudge(tune).getSolution(tune)
+                   for tune in self.melodies]
+        self.roots_df['Bellman Budge'] = bellman
+
+        temperley = [music21.analysis.discrete.TemperleyKostkaPayne(tune).getSolution(tune)
+                     for tune in self.melodies]
+        self.roots_df['Temperly Kostka Payne'] = temperley
+
+        print("Music 21 key detection complete.")
+        return self.roots_df
+
+    def extract_key_signature_from_midi_files(self):
+        self.roots_df['MIDI root'] = [tune.keySignature for tune in self.melodies]
+        print("Key signatures extracted from MIDI files.")
+        return self.roots_df
+
+    def extract_final_note(self):
+
+        final_notes = []
+        for tune in self.melodies:
+            last_note = tune.recurse().notes[-1]
+            if last_note.isNote:
+                final_notes.append(last_note.name.upper())
+            elif last_note.isChord:
+                final_notes.append(last_note.root().name.upper())
+            else:
+                final_notes.append('')
+
+        self.roots_df['final_note'] = final_notes
+        print("\nFinal note extracted.")
+        return self.roots_df
+
+    def convert_keys_to_roots(self):
+        roots = self.roots_df.copy()
+        roots.dropna(axis=1, inplace=True)
+        roots.set_index('title', inplace=True)
+        print(roots.dtypes)
+        self.roots_df = roots.applymap(lambda x: x.tonic.name.upper())
+        return self.roots_df
+
+    def convert_note_names_to_pitch_classes(self):
+
+        # converts root note names to root number (pitch class relative to C)
+        # appends result to self.roots dataframe
+        roots = self.roots_df.astype('string')
+        # lookup numeric root vals & map to new column:
+        lookup = dict(zip(constants.music21_lookup_table['note name'], constants.music21_lookup_table['pitch class']))
+        roots = roots.replace(lookup)
+        roots.apply(pd.to_numeric, errors='coerce')
+        print("\nRoot note names data table:")
+        print(self.roots_df.head())
+        print(f'Checksum: {len(roots)}')
+        self.roots_df = roots
+        return self.roots_df
+
     def combine_feat_seqs_and_titles(self):
         """Stores title-stream pairs for each melody in corpus in a dictionary"""
         self.corpus = dict(zip(self.titles, self.feat_seqs))
@@ -136,6 +209,7 @@ class MusicData:
         self.music_data = feat_seq[1]
         self.music_data_accents = utils.filter_dataframe(self.music_data, seq='velocity')
         self.weighted_music_data = None  # will hold duration-weighted feature sequence dataframe
+        self.weighted_music_data_accents = None
 
     def __getitem__(self, item):
         return getattr(self, item)
@@ -229,6 +303,11 @@ class MusicData:
         self.weighted_music_data = self.weighted_music_data.rename_axis('eighth_note')
         return self.weighted_music_data
 
+    def extract_duration_weighted_music_data_accents(self):
+
+        self.weighted_music_data_accents = utils.filter_dataframe(self.weighted_music_data, seq='dur_weighted_velocity')
+        return self.weighted_music_data_accents
+
 
 class MusicDataCorpus(Music21Corpus):
 
@@ -290,17 +369,53 @@ class MusicDataCorpus(Music21Corpus):
         self.print_sample_output()
         return self.corpus
 
-    def read_root_data(self, roots_path):
+    def find_most_freq_notes_in_melodies(self):
+
+        most_freq_notes = [melody.music_data.mode()['MIDI_note'][0] for melody in self.corpus]
+        most_freq_weighted_notes = [melody.weighted_music_data.mode()['dur_weighted_MIDI_note'][0]
+                                    for melody in self.corpus]
+        # most_freq_accents = [melody.music_data_accents.mode()['MIDI_note'] for melody in self.corpus]
+        # most_freq_weighted_accents = [melody.weighted_music_data_accents.mode()['dur_weighted_MIDI_note']
+        #                               for melody in self.corpus]
+
+        self.roots_df['freq note'] = most_freq_notes
+        self.roots_df['freq weighted note'] = most_freq_weighted_notes
+        # self.roots_df['freq acc'] = most_freq_accents
+        # self.roots_df['freq weighted acc'] = most_freq_weighted_accents
+
+        self.roots_df['freq note'] = self.roots_df['freq note'] % 12
+        self.roots_df['freq weighted note'] = self.roots_df['freq weighted note'] % 12
+        # self.roots_df['freq acc'] = self.roots_df['freq acc'] % 12
+        # self.roots_df['freq weighted acc'] = self.roots_df['freq weighted acc'] % 12
+
+        print("\nFrequent note data added to root detection metrics table:")
+        print(self.roots_df.head())
+        return self.roots_df
+
+    def append_expert_assigned_root_values(self, path):
+
+        expert_assigned_roots = pd.read_csv(path)
+        expert_assigned_roots.set_index('title', inplace=True, drop=True)
+        # expert_assigned_roots = expert_assigned_roots.to_numeric('root', errors='coerce')
+        expert_assigned_roots['expert assigned'] = pd.to_numeric(expert_assigned_roots['expert assigned'])
+        expert_assigned_roots['expert assigned'] = expert_assigned_roots['expert assigned'].round()
+        print("\nReading expert-assigned root data:")
+        print(expert_assigned_roots.head())
+        print("\nAppending expert-assigned root data to root detection metrics table:")
+        self.roots_df = self.roots_df.join(expert_assigned_roots)
+        print(self.roots_df.head())
+        return self.roots_df
+
+    def read_root_data(self, path):
 
         """
-        Reads root notes csv table from location specified in 'roots_path' arg.
+        Reads root notes csv table from location specified in 'path' arg.
         This table must contain a column named 'root' containing a root note value for every melody in the corpus,
         expressed as a chromatic pitch classes (C = 0 through B# = 11).
-        It must also contain a 'title' column of melody titles , formatted as per MusicData.title
-        (i.e.: full filename without filetype suffix).
+        It must also contain a 'title' column of melody titles.
         """
 
-        self.roots = pd.read_csv(roots_path)
+        self.roots = pd.read_csv(path)
         self.roots.reset_index(inplace=True, drop=True)
         print("\nImporting root data for all melodies in corpus:")
         print(self.roots.head())
@@ -379,6 +494,14 @@ class MusicDataCorpus(Music21Corpus):
         print(f"{self.corpus[0].weighted_music_data.head()}\n\n")
         return self.corpus
 
+    def extract_duration_weighted_accent_seqs(self):
+
+        for melody in self.corpus:
+            melody.extract_duration_weighted_music_data_accents()
+        print(f"\nMusicDataCorpus.extract_duration_weighted_accent_seqs(): sample outputs for {self.titles[0]}:")
+        print(f"{self.corpus[0].weighted_music_data_accents.head()}\n\n")
+        return self.corpus
+
     def print_sample_output(self):
 
         print("\nSample feature sequence output (note-event level):")
@@ -408,7 +531,7 @@ class MusicDataCorpus(Music21Corpus):
                 print(f"Writing output: {pa}/{filename}.csv")
 
         return None
-
+    
 
 def main():
     print('Running corpus_processing_tools.py')

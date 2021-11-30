@@ -1,15 +1,17 @@
 from matplotlib import pyplot as plt, cm, ticker
 import numpy as np
 
+import setup_corpus.constants as constants
 from utils import *
+
 
 
 class MusicData:
 
     def __init__(self, fin):
         music_data = read_csv(fin)
-        self.title = list(music_data)[0]  # melody title
-        self.music_data = music_data[self.title]  # feature sequence dataframe
+        self.title = music_data[0]  # melody title
+        self.music_data = music_data[1]  # feature sequence dataframe
         # feature sequence dataframe of accented notes only:
         self.music_data_accents = filter_dataframe(self.music_data, seq='velocity')
         self.weighted_music_data = None  # will hold duration-weighted feature sequence dataframe
@@ -39,10 +41,10 @@ class MusicData:
         return extract_feature_sequence(self.music_data_accents, col_name)
 
     def find_most_frequent_val_in_feat_seq(self, col_name):
-        find_most_frequenct_value_in_seq(self.music_data, col_name)
+        find_most_frequent_value_in_seq(self.music_data, col_name)
 
     def find_most_frequent_val_in_accents_feat_seq(self, col_name):
-        find_most_frequenct_value_in_seq(self.music_data_accents, col_name)
+        find_most_frequent_value_in_seq(self.music_data_accents, col_name)
 
     def generate_duration_weighted_music_data(self, feat_seqs):
         if self.weighted_music_data is None:
@@ -73,15 +75,15 @@ class MusicData:
     def find_most_freq_note(self):
         # find most common MIDI note number in duration-weighted pitch sequence:
 
-        most_freq_note = find_most_frequenct_value_in_seq(self.music_data, seq='MIDI_note')
-        most_freq_acc = find_most_frequenct_value_in_seq(self.music_data_accents, seq='MIDI_note')
-        most_freq_weighted_note = find_most_frequenct_value_in_seq(self.weighted_music_data,
+        most_freq_note = find_most_frequent_value_in_seq(self.music_data, seq='MIDI_note')
+        # most_freq_acc = find_most_frequent_value_in_seq(self.music_data_accents, seq='MIDI_note')
+        most_freq_weighted_note = find_most_frequent_value_in_seq(self.weighted_music_data,
                                                                   seq='dur weighted MIDI_note')
-        most_freq_weighted_acc = find_most_frequenct_value_in_seq(self.weighted_music_data_accents,
-                                                                   seq='dur weighted MIDI_note')
+        # most_freq_weighted_acc = find_most_frequent_value_in_seq(self.weighted_music_data_accents,
+        #                                                            seq='dur weighted MIDI_note')
 
-        res = [most_freq_note, most_freq_acc, most_freq_weighted_note, most_freq_weighted_acc]
-        labels = ['freq note', 'freq acc', 'freq weighted note', 'freq weighted acc']
+        res = [most_freq_note, most_freq_weighted_note]
+        labels = ['freq note', 'freq weighted note']
 
         if self.most_freq_notes is None:
             self.most_freq_notes = dict(zip(labels, res))
@@ -90,7 +92,7 @@ class MusicData:
     def find_most_freq_acc_note(self):
 
         if self.most_freq_acc is None:
-            self.most_freq_acc = find_most_frequenct_value_in_seq(self.weighted_music_data_accents,
+            self.most_freq_acc = find_most_frequent_value_in_seq(self.weighted_music_data_accents,
                                                                    seq='dur weighted MIDI_note')
         return self.most_freq_acc
 
@@ -153,7 +155,7 @@ class MusicDataCorpus:
         # convert numeric root values from MIDI note numbers to values from 0-11, where 0=C and 11=B
         # (I.E.: chromatic pitch classes with C as root)
         normalized_roots = self.music_data_roots.copy()
-        col_names = ['freq note', 'freq acc', 'freq weighted note', 'freq weighted acc']
+        col_names = ['freq note', 'freq weighted note']
         for name in col_names:
             normalized_roots[name] = self.music_data_roots[name] % 12
 
@@ -166,7 +168,7 @@ class MusicDataCorpus:
 
     def convert_normalized_roots_to_note_names(self):
         # NOTE: below could possibly be implemented via DataFrame.merge():
-        lookup = dict(zip(constants.lookup_table['root nums'], constants.lookup_table['note names']))
+        lookup = dict(zip(constants.lookup_table['root num'], constants.lookup_table['note names']))
         root_names = self.normalized_roots.copy()
         root_names.set_index('title', inplace=True)
         # lookup vals for entire dataframe:
@@ -183,7 +185,7 @@ class MusicDataCorpus:
         # appends result to self.roots dataframe
         roots = self.roots.copy()
         # lookup numeric root vals & map to new column:
-        lookup = dict(zip(constants.lookup_table['note names'], constants.lookup_table['root nums']))
+        lookup = dict(zip(constants.lookup_table['note name'], constants.lookup_table['pitch class']))
         roots = roots.replace(lookup)
         roots.set_index('title', inplace=True)
         self.roots_numeric = roots
@@ -198,16 +200,16 @@ class MusicDataCorpus:
         # converts root number (pitch class relative to C) to MIDI note number for 4th octave.
         # appends result to self.roots dataframe
         roots = self.roots.copy()
-        roots['MIDI_root'] = roots['root num'].map(constants.lookup_table.set_index('root nums')['4th oct midi num'])
+        roots['MIDI_root'] = roots['root num'].map(constants.lookup_table.set_index('root num')['midi num'])
         self.roots = roots
         print(self.roots.head())
         return self.roots
 
     def read_music21_roots(self, music21_path):
-        music21_roots = list(read_csv(music21_path).values())[0]
+        music21_roots = read_csv(music21_path)[1]
         if self.music21_roots is None:
             self.music21_roots = music21_roots
-            self.music21_roots.set_index('title')
+            print(self.music21_roots.head())
             print(f'Checksum: Music21 root values: {len(self.music21_roots)}')
         return self.music21_roots
 
@@ -215,6 +217,7 @@ class MusicDataCorpus:
 
         if self.roots is None:
             self.roots = pd.merge(self.music21_roots, self.root_names, on='title', how='left')
+            print(self.roots.head())
             print(f'Checksum: combined root values: {len(self.roots)}')
         return self.roots
 
@@ -238,12 +241,14 @@ class MusicDataCorpus:
 
     def append_expert_assigned_root_data(self, inpath):
         # extracts expert-assigned root values from given csv table, and appends to self.roots dataframe
-        expert_assigned_roots_table = read_csv(inpath)
-        expert_assigned_roots_dataframe = list(expert_assigned_roots_table.values())[0]
-        expert_assigned_roots = expert_assigned_roots_dataframe.pop('expert assigned')
+        expert_assigned_roots_table = read_csv(inpath, dtype=str)
+        expert_assigned_roots_dataframe = expert_assigned_roots_table[1]
         print(expert_assigned_roots_dataframe.head())
+        expert_assigned_roots = expert_assigned_roots_dataframe.pop('root')
+        print(expert_assigned_roots.head())
         print(f'Checksum: number of expert-assigned values: {len(expert_assigned_roots)}')
-        print(f"Checksum: number of automatically-detected values: {len(self.roots['root'])}")
+        print(f"Checksum: number of automatically-detected values: {len(self.roots)}")
+        # merge
         self.roots['expert assigned'] = expert_assigned_roots
         print(self.roots.head())
         return self.roots
@@ -424,7 +429,7 @@ class MusicDataCorpus:
 
 # Run:
 
-indir = '/Users/dannydiamond/NUIG/Polifonia/CRE/CRE_primary_feat_seq'
+indir = '/Users/dannydiamond/NUIG/Polifonia/MTC/primary_feat_seqs'
 
 # set up corpus:
 cre = MusicDataCorpus(indir)
@@ -437,43 +442,35 @@ cre.calculate_duration_weighted_feat_seq_data(['MIDI_note', 'velocity'])
 cre.filter_duration_weighted_accents()
 # find most frequently occurring MIDI note and accented note in 'standard' and duration-weighted sequences:
 cre.find_most_freq_notes_in_pitch_seq()
-# add the results of the above to a corpus-level dataframe, giving the title and two most frequent notes for each tune:
+# add the results of the above to a corpus-level dataframe, giving the title and most frequent notes for each tune:
 cre.populate_musicdata_roots_df()
 # normalize numerical values in above dataframe to one octave:
 cre.noramalize_root_values()
 # convert numerical root vals to note names:
 cre.convert_normalized_roots_to_note_names()
 # read music21 roots:
-m21_roots = cre.read_music21_roots(
-    '/Users/dannydiamond/NUIG/Polifonia/CRE/root_detection/music21_root_detection/music21_roots.csv')
-# remove old cols - not required:
-remove_cols_from_dataframe(m21_roots, ['root', 'certainty'])
+m21_roots = cre.read_music21_roots('/Users/dannydiamond/NUIG/Polifonia/MTC/root_detection/music21_roots.csv')
 # combine music21 and MusicDataCorpus root dataframes:
 cre.concatenate_music21_and_music_data_roots()
 # remove least-accurate freq columns:
-remove_cols_from_dataframe(cre.roots, ['freq acc', 'freq weighted note'])
+# remove_cols_from_dataframe(cre.roots, ['freq acc', 'freq weighted note'])
 # calculate simple agreement scores for modal root values:
-cre.calculate_root_result_confidence_scores()
-# find most frequent root:
-cre.find_most_frequent_root_results()
-# write_to_csv(cre.roots, '/Users/dannydiamond/NUIG/Polifonia/CRE/root_detection/aggregated_results/',
-#              'MusicDataCorpus_prelim_root_assingments_TEST')
+# cre.calculate_root_result_confidence_scores()
+# # find most frequent root:
+# cre.find_most_frequent_root_results()
 # append expert-assigned root column to MusicDataCorpus.roots:
-expert_roots_path = "/Users/dannydiamond/NUIG/Polifonia/CRE/root_detection/" \
-          "aggregated_results/cre_root_detection_NOTE_NAMES.csv"
+expert_roots_path = '/Users/dannydiamond/NUIG/Polifonia/MTC/root_detection/expert_assigned_roots_reformatted.csv'
 cre.append_expert_assigned_root_data(expert_roots_path)
-# convert root names back to MIDI numbers:
-cre.convert_root_names_to_root_nums()
+write_to_csv(cre.roots, '/Users/dannydiamond/NUIG/Polifonia/MTC/root_detection', 'TEST.csv')
 # calculate and visualize Pearson correlation matrix for all tunes:
 # plt_title = 'Pearson correlation matrix:\n' \
 #              'Results of root detection metrics, with mode of results, and expert-assigned root'
 # cre.calculate_correlation_matrix('4_selected_algs_mode_exp', plt_title)
 # calculate % agreement between mode and expert-assigned root values:
-cre.calculate_percentage_agreement_between_metrics_and_expert_assigned_vals('/Users/dannydiamond/NUIG/Polifonia/CRE/'
-                                                                            'root_detection/aggregated_results/')
+# cre.calculate_percentage_agreement_between_metrics_and_expert_assigned_vals('/Users/dannydiamond/NUIG/Polifonia/CRE/'
+#                                                                             'root_detection/aggregated_results/')
 # # Save cre.roots table:
-# write_to_csv(cre.roots_numeric, '/Users/dannydiamond/NUIG/Polifonia/CRE/root_detection/'
-#                                 'aggregated_results/', 'cre_root_detection_NOTE_NUMS')
+write_to_csv(cre.roots_numeric, '/Users/dannydiamond/NUIG/Polifonia/MTC/root_detection', 'mtc_root_detection_NUMS')
 
 # pre-process for Fleiss' Kappa calculation:
 # cre.preprocess_root_freq_data()
