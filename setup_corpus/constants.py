@@ -1,13 +1,15 @@
 """
 Constants.py contains:
 
-NOTES_NAMES_NUMBERS -- a dictionary, formatted per: note names (keys): lists of corresponding MIDI note numbers (values)
+MUSIC21_LOOKUP_TABLE -- a dictionary, formatted per: Music21-style note names (keys): chromatic pitch classes (values)
+
+NOTES_NAMES_NUMBERS -- a dictionary, formatted per: Music21-style note names (keys): lists of corresponding MIDI note
+numbers (values)
 
 setup_lookup_table() -- a function to convert NOTES_NAMES_NUMBERS constants dict into a Pandas dataframe, allowing
 flexible multi-directional lookups in corpus_processing_tools.py root assignment.
 """
 
-# TODO: Document, rename lookup tables; restructure second lookup table.
 
 import pandas as pd
 
@@ -17,7 +19,7 @@ MUSIC21_LOOKUP_TABLE = {
     'G-': 6, 'G': 7, 'G#': 8, 'A-': 8, 'A': 9, 'A#': 10, 'B-': 10, 'B': 11
 }
 
-NOTES_NAMES_NUMBERS = {
+NOTES_NAMES_MIDI_NUMBERS = {
 
     'C': list(range(0, 109, 12)),
     'C# or D-': list(range(1, 109, 12)),
@@ -54,7 +56,7 @@ def setup_music21_lookup_table(data=None):
 def setup_lookup_table(data=None):
 
     if data is None:
-        data = NOTES_NAMES_NUMBERS
+        data = NOTES_NAMES_MIDI_NUMBERS
     note_names = [key for key in data.keys()]
     fourth_oct_midi_nums = [(val[5]) for val in data.values()]
     root_nums = [val % 12 for val in fourth_oct_midi_nums]

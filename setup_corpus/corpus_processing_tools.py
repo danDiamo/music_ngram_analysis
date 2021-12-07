@@ -43,6 +43,7 @@ class Music21Corpus:
         inpath -- per above.
         filenames -- list of all filenames in 'inpath' directory.
         titles -- reformatted 'filenames' list, omitting non-MIDI files and removing filetype suffixes.
+        roots_df -- will hold dataframe of root detection metrics.
         melodies -- will hold list of all melodies in corpus after conversion to Music21 stream objects.
         feat_seqs -- Primary feature sequence data outputted by Music21Corpus.derive_feat_seqs().
         corpus -- will hold dict of titles (keys) and feat_seqs (values) for all melodies in corpus.
@@ -105,7 +106,7 @@ class Music21Corpus:
         return self.feat_seqs
 
     def run_music21_key_detection_algs(self):
-
+        """Runs Music21's built-in key detection algorithms and stores output in Music21Corpus.roots_df dataframe."""
         self.roots_df = pd.DataFrame()
         self.roots_df['title'] = self.titles
         self.roots_df.reset_index(inplace=True, drop=True)
@@ -133,15 +134,16 @@ class Music21Corpus:
         return self.roots_df
 
     def extract_key_signature_from_midi_files(self):
-        self.roots_df['MIDI root'] = [tune.keySignature for tune in self.melodies]
+        """Extracts key signature data from MIDI input files; stores in Music21Corpus.roots_df dataframe."""
+        self.roots_df['MIDI root'] = [tune.keySignature for tune in self.melodies if tune.keySignature]
         print("Key signatures extracted from MIDI files.")
         return self.roots_df
 
     def extract_final_note(self):
-
+        """Extracts note name of final note from every melody in corpus; stores in Music21Corpus.roots_df dataframe."""
         final_notes = []
-        for tune in self.melodies:
-            last_note = tune.recurse().notes[-1]
+        for mel in self.melodies:
+            last_note = mel.recurse().notes[-1]
             if last_note.isNote:
                 final_notes.append(last_note.name.upper())
             elif last_note.isChord:
@@ -154,6 +156,7 @@ class Music21Corpus:
         return self.roots_df
 
     def convert_keys_to_roots(self):
+        """Extracts root note names from key signatures outputted by MusicDataCorpus.run_music21_key_detection_algs()"""
         roots = self.roots_df.copy()
         roots.dropna(axis=1, inplace=True)
         roots.set_index('title', inplace=True)
@@ -163,8 +166,9 @@ class Music21Corpus:
 
     def convert_note_names_to_pitch_classes(self):
 
-        # converts root note names to root number (pitch class relative to C)
-        # appends result to self.roots dataframe
+        """Converts note names, formatted per Music21 standard (i.e.: G- = G natural; G# = G sharp) to integer chromatic
+         pitch class values from 0-11, via constants.music21_lookup_table."""
+
         roots = self.roots_df.astype('string')
         # lookup numeric root vals & map to new column:
         lookup = dict(zip(constants.music21_lookup_table['note name'], constants.music21_lookup_table['pitch class']))
@@ -195,6 +199,7 @@ class MusicData:
 
     Attributes:
         title -- melody title (MIDI filename)
+
         music_data -- Pandas dataframe containing primary feature sequence data for melody
 
         music_data_accents --  filtered version of music_data dataframe, retaining only data for note events
@@ -202,13 +207,17 @@ class MusicData:
 
         weighted_music_data -- empty attribute to hold duration-weighted feature sequence dataframe as returned by
         MusicData.generate_duration_weighted_music_data() method.
+
+        weighted_music_data_accents -- empty attribute to hold accent-level duration-weighted feature sequence data,
+        as returned by MusicData.extract_duration_weighted_music_data_accents() method.
+
     """
 
     def __init__(self, feat_seq):
         self.title = feat_seq[0]
         self.music_data = feat_seq[1]
         self.music_data_accents = utils.filter_dataframe(self.music_data, seq='velocity')
-        self.weighted_music_data = None  # will hold duration-weighted feature sequence dataframe
+        self.weighted_music_data = None
         self.weighted_music_data_accents = None
 
     def __getitem__(self, item):
@@ -305,6 +314,9 @@ class MusicData:
 
     def extract_duration_weighted_music_data_accents(self):
 
+        """Filters duration-weighted feature sequence data stored at MusicDataCorpus.weighted_music_data attr,
+        returns output to MusicDataCorpus.weighted_music_data_accents"""
+
         self.weighted_music_data_accents = utils.filter_dataframe(self.weighted_music_data, seq='dur_weighted_velocity')
         return self.weighted_music_data_accents
 
@@ -371,22 +383,34 @@ class MusicDataCorpus(Music21Corpus):
 
     def find_most_freq_notes_in_melodies(self):
 
-        most_freq_notes = [melody.music_data.mode()['MIDI_note'][0] for melody in self.corpus]
-        most_freq_weighted_notes = [melody.weighted_music_data.mode()['dur_weighted_MIDI_note'][0]
+        """For each melody in the corpus, this method finds mode values for note-level, accent-level, duration-weighted,
+        and duration-weighted accent-level pitch sequences (all represented by MIDI note number). This data is saved to
+        MusicDataCorpus.roots_df dataframe and is used as input for root_key_detection component."""
+
+        # find most frequent pitch (MIDI note number) for each melody in corpus:
+        freq_notes = [melody.music_data.mode()['MIDI_note'][0] for melody in self.corpus]
+        # find most frequent duration-weighted pitch (MIDI note number) for each melody in corpus:
+        freq_weighted_notes = [melody.weighted_music_data.mode()['dur_weighted_MIDI_note'][0]
                                     for melody in self.corpus]
-        # most_freq_accents = [melody.music_data_accents.mode()['MIDI_note'] for melody in self.corpus]
-        # most_freq_weighted_accents = [melody.weighted_music_data_accents.mode()['dur_weighted_MIDI_note']
-        #                               for melody in self.corpus]
+        # find most frequent accented pitch (MIDI note number) for each melody in corpus:
+        freq_accents = [melody.music_data_accents.mode()['MIDI_note'] for melody in self.corpus
+                             if melody.music_data_accents is not None]
+        # find most frequent duration-weighted pitch accent pitch (MIDI note number) for each melody in corpus:
+        freq_weighted_accents = [melody.weighted_music_data_accents.mode()['dur_weighted_MIDI_note']
+                                      for melody in self.corpus if melody.weighted_music_data_accents is not None]
 
-        self.roots_df['freq note'] = most_freq_notes
-        self.roots_df['freq weighted note'] = most_freq_weighted_notes
-        # self.roots_df['freq acc'] = most_freq_accents
-        # self.roots_df['freq weighted acc'] = most_freq_weighted_accents
-
+        # Add values calculated above to self.roots_df dataframe:
+        self.roots_df['freq note'] = freq_notes
+        self.roots_df['freq weighted note'] = freq_weighted_notes
         self.roots_df['freq note'] = self.roots_df['freq note'] % 12
         self.roots_df['freq weighted note'] = self.roots_df['freq weighted note'] % 12
-        # self.roots_df['freq acc'] = self.roots_df['freq acc'] % 12
-        # self.roots_df['freq weighted acc'] = self.roots_df['freq weighted acc'] % 12
+
+        if freq_accents:
+            self.roots_df['freq acc'] = freq_accents
+            self.roots_df['freq acc'] = self.roots_df['freq acc'] % 12
+        if freq_weighted_accents:
+            self.roots_df['freq weighted acc'] = freq_weighted_accents
+            self.roots_df['freq weighted acc'] = self.roots_df['freq weighted acc'] % 12
 
         print("\nFrequent note data added to root detection metrics table:")
         print(self.roots_df.head())
@@ -394,9 +418,12 @@ class MusicDataCorpus(Music21Corpus):
 
     def append_expert_assigned_root_values(self, path):
 
+        """Reads expert-assigned root values from an external csv file, containing one root note value
+        (chromatic pitch class) per melody in the corpus. This data is added to MusicDataCorpus.roots_df dataframe, and
+        is used as input for root_key_detection component."""
+
         expert_assigned_roots = pd.read_csv(path)
         expert_assigned_roots.set_index('title', inplace=True, drop=True)
-        # expert_assigned_roots = expert_assigned_roots.to_numeric('root', errors='coerce')
         expert_assigned_roots['expert assigned'] = pd.to_numeric(expert_assigned_roots['expert assigned'])
         expert_assigned_roots['expert assigned'] = expert_assigned_roots['expert assigned'].round()
         print("\nReading expert-assigned root data:")
